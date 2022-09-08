@@ -1,60 +1,117 @@
 # Approach 2
 
-## Cleaning from approach 1
-If you come from the approach 1, you first need to delete `RequestAuthentication` object and `AuthorizationPolicy` object from `bookinfo`:
+This is a modified version of the original approach 2 where instead of using RH SSO as the oauth2-proxy we are using the OpenShift oauth server as an oauth-proxy. 
+The configuration steps remain the same, except that there is no need to install and configure RHSSO or to have gone through the other approaches. Also there is no need to update the oauth-proxy sidecar to reflect your cluster configuration since there is no reference to route in there. However, you might still want to update the manifest to reflect your configuration like adjusting the openshift-sar, permission or others valid oauth-proxy arguments you may want to use. 
+In the commands below the namespace used is istio-system. Feel free to update it to match the namespace you are using for your Service Mesh Control Plane.
+
+## Prerequisites
+To configure the OpenShift oauth-proxy, a few things need to also be configured. 
+
+### Configure user and permissions for the applicable identity provider used in your cluster. 
+1. Get the list of configured Identity Providers for you cluster 
 ```
-$ oc delete requestauthentication,authorizationpolicy -n bookinfo --all
-requestauthentication.security.istio.io "jwt-rhsso" deleted
-authorizationpolicy.security.istio.io "authpolicy" deleted
+$ oc get oauth cluster -o jsonpath='{.spec.identityProviders}{"\n"}' | jq .
+```
+2. Chose the IDP to use for this. We will assume that you have htpasswd configured in the next step. Feel free to adapt it to the configuration you have in your cluster.
 
-# Wait some seconds for Istio to update its config
+3. Retrieve and update the current htpasswd from the existing secret so that it includes our test user localuser
+   1. Find the current htpasswd secret
+      ```
+      $ oc get secret -n openshift-config --no-headers | grep htpass | awk '{print $1}'
+      ```
+   2. Extract the current htpasswd file to be updated later
+      ```
+      $ oc extract secret/$(oc get secret -n openshift-config --no-headers | grep htpass | awk '{print $1}') -n openshift-config --to=/tmp/
+      ```
+   3. Add the localuser to the retrieved htpasswd file
+      ```
+      $ htpasswd -bB /tmp/htpasswd localuser localuser
+      ```
+   4. Update the htpasswd secret so that it includes our localuser
+      ```
+      $ oc create secret generic $(oc get secret -n openshift-config --no-headers | grep htpass | awk '{print $1}') \
+          --from-file=htpasswd=/tmp/htpasswd --dry-run=client -o yaml -n openshift-config | oc replace -f -
+      ```
+   
+4. Grant the localuser permission to access the sample app namespace (it is assumed that the namespace was already created and the app deployed)
+```
+$ oc adm policy add-role-to-user admin localuser -n bookinfo
+```
+It was assumed that the namespace where the sample app was deployed is bookinfo. If not update the above command before running it
 
-# Test free access to bookinfo:
+
+### Create a random cookie secret to be used by the oauth-proxie sidecar in the service mesh control plane namespace. 
+```
+$ oc -n istio-system create secret generic bookinfo-cookie-secret --from-literal=session-secret=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c32)
+```
+Again above it was assumed that the SMCP is deployed into istio-system. If not update the above command before running it.
+ 
+
+### Create a service account to be used by the oauth-proxie sidecar in the service mesh control plane namespace. 
+```
+$ oc -n istio-system create serviceaccount bookinfo
+```
+Again above it was assumed that the SMCP is deployed into istio-system. If not update the above command before running it.
+
+
+### Annotate the service account created above with a redirect URI to match the ingress gatway route to be used by the oauth-proxie sidecar in the service mesh control plane namespace. 
+```
+$ oc -n istio-system annotate serviceaccount bookinfo serviceaccounts.openshift.io/oauth-redirecturi.first='https://$(oc -n istio-system get route istio-ingressgateway -o jsonpath='{.spec.host}')'
+```
+
+### Grant the istio-gateway-service-account auth-delegator permissions in the service mesh control plane namespace. 
+```
+$ oc adm policy add-cluster-role-to-user system:auth-delegator system:serviceaccount:istio-system:istio-ingressgateway-service-account 
+```
+
+
+## Check that the sample app is deployed and that you can access it using curl 
+```
 $ export GATEWAY_URL=$(oc -n istio-system get route istio-ingressgateway -o jsonpath='{.spec.host}')
 $ curl -I http://$GATEWAY_URL/productpage
 HTTP/1.1 200 OK
+$ curl -s http://$GATEWAY_URL/productpage | grep -o "<title>.*</title>"
 ```
 
-## Injecting oauth2-proxy container inside the Istio Ingress Gateway pod
-First, ensure that `<CLUSTERNAME>` and `<BASEDOMAIN>` have been replaced with the appropriate values in `01_patch-istio-ingressgateway-deploy.yaml` (this has been done during the prerequisites phase).
+## Inject the oauth-proxy into the ingress gateway and make appropriate updates 
 
-Also, ensure the argument `--client-secret` inside the YAML file matches the secret of the istio client in RHSSO (see prerequisites).
-```
-# Check the client secret
-$ cat 01_patch-istio-ingressgateway-deploy.yaml | grep 'client-secret'
-```
+### Inject oauth-proxy container inside the Istio Ingress Gateway pod
+First, make any appropriate or necessary changes to the oauth-proxy sidecar manifest in `01_patch-istio-ingressgateway-deploy.yaml` .
 
 Then, patch the Istio Ingress Gateway deployment:
 ```
 $ oc patch deploy istio-ingressgateway -n istio-system --patch "$(cat 01_patch-istio-ingressgateway-deploy.yaml)"
+```
 
-# Check the istio-ingressgateway pod has now 2 containers:
+### Check the istio-ingressgateway pod has now 2 containers:
+```
 $ oc get pod -n istio-system
 [...]
-istio-ingressgateway-946644c7f-7knb7   2/2     Running   0          48s
+istio-ingressgateway-64b876ff55-98nzl   2/2     Running   0          30s
 [...]
 ```
 
-**Note:** at the time of writing (2nd of March 2021), the manifest SHA of the used oauth2-proxy image from Quay is `15eaf47e0ca8`. 
+### Redirect Istio Ingress Gateway route to the oauth-proxy container
+In order to enforce authentication, the default ingress gateway route must now target the oauth-proxy container instead of the istio-proxy container (which is the original container of the Istio Ingress Gateway pod). Once authenticated, the oauth-proxy container will forward the request locally to the istio-proxy container since they are in the same pod.
 
-## Redirect Istio Ingress Gateway route to the oauth2-proxy container
-In order to enforce authentication, the default ingress gateway route must now target the oauth2-proxy container instead of the istio-proxy container (which is the original container of the Istio Ingress Gateway pod). Once authenticated, the oauth2-proxy container will forward the request locally to the istio-proxy container since they are in the same pod.
-
+### Add the oauth-proxy port to the Istio Ingress Gateway service
 ```
-# Add the oauth2-proxy port to the Istio Ingress Gateway service
 $ oc patch svc istio-ingressgateway -n istio-system --patch "$(cat 02_patch-istio-ingressgateway-svc.yaml)" 
 service/istio-ingressgateway patched
+```
 
-# Set edge TLS termination for the Istio Ingress Gateway route
-# This is needed since RHSSO is configured by default to use HTTPS only.
+### Set edge TLS termination for the Istio Ingress Gateway route
+```
 $ oc patch route istio-ingressgateway -n istio-system --patch "$(cat 03_patch-istio-ingressgateway-route-edge.yaml)" 
 route.route.openshift.io/istio-ingressgateway patched
+```
 
-# Make the Istio Ingress Gateway route target the oauth2-proxy container
+### Make the Istio Ingress Gateway route target the oauth2-proxy container
+```
 $ oc patch route istio-ingressgateway -n istio-system --patch "$(cat 04_patch-istio-ingressgateway-route-oauth.yaml)" 
 route.route.openshift.io/istio-ingressgateway patched
 ```
 
-## Test the OIDC redirection workflow to access bookinfo
-In a browser, in a private navigation mode, open https://istio-ingressgateway-istio-system.apps.<CLUSTERNAME>.<BASEDOMAIN>/productpage .
-You are redirected to our RHSSO, and if you authenticate using `localuser:localuser` you are then successfully redirected to the `bookinfo` application.
+### Test the OpenShift Oauth-proxy redirection workflow to access bookinfo
+In a browser, in a private navigation mode, open `https://$(oc -n kubic-ocp-oauth-smcp get route istio-ingressgateway -o jsonpath='{.spec.host}')/productpage` .
+You are redirected to our OpenShift Login page, and if you authenticate using `localuser:localuser` you are then successfully redirected to the `bookinfo` application.
