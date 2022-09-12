@@ -17,29 +17,28 @@ spec:
         # upstream to forward to istio-proxy container
         - -upstream=http://127.0.0.1:8080
         - -scope=user:info user:check-access user:list-projects
-        - -openshift-service-account=bookinfo
+        - -openshift-service-account=istio-ingressgateway-service-account
+        #- -openshift-service-account=bookinfo
         - -pass-access-token
         - -pass-basic-auth=true
         - -pass-user-bearer-token=true
         - -set-xauthrequest=true
         - -ssl-insecure-skip-verify=true
         - -request-logging=true
-        - >-
-          --validate-url=https://openshift.default.svc.cluster.local/oapi/v1/users/~
-        - >-
-          --redeem-url=https://openshift.default.svc.cluster.local/oauth/token
-        - >-
-          --openshift-review-url=https://openshift.default.svc.cluster.local/oapi/v1/subjectaccessreviews
+        #- >-
+        #  --validate-url=https://openshift.default.svc.cluster.local/oapi/v1/users/~
+        #- >-
+        #  --redeem-url=https://openshift.default.svc.cluster.local/oauth/token
+        #- >-
+        #  --openshift-review-url=https://openshift.default.svc.cluster.local/oapi/v1/subjectaccessreviews
         - >-
           --openshift-delegate-urls={"/":{ "resource":"namespaces",
               "verb":"get"
               }}
         - >-
-          --openshift-sar={"apiVersion": "v1", "kind":
+          --openshift-sar={"apiVersion": "authorization.openshift.io/v1", "kind":
               "SubjectAccessReview", "resource": "namespaces", "verb": "get"
               }
-        - >-
-          -openshift-sar={"namespace":"kubic-ocp-oauth-default-bf","resource":"pods","verb":"list"}
         # (better option: mount OCP ingress CA in the pod and use --provider-ca-file)
         #- -tls-cert=/etc/tls/private/tls.crt
         #- -tls-key=/etc/tls/private/tls.key
@@ -61,4 +60,3 @@ spec:
           readOnly: true
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
-        serviceAccountName: bookinfo
