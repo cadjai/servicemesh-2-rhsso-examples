@@ -47,16 +47,16 @@ $ oc -n istio-system create secret generic bookinfo-cookie-secret --from-literal
 Again above it was assumed that the SMCP is deployed into istio-system. If not update the above command before running it.
  
 
-### Create a service account to be used by the oauth-proxie sidecar in the service mesh control plane namespace. 
+### Create a service account to be used by the oauth-proxie sidecar in the service mesh control plane namespace in case you don't want to use the default serviceaccount used by the ingress gateway (istio-ingressgateway-service-account). 
 ```
 $ oc -n istio-system create serviceaccount bookinfo
 ```
 Again above it was assumed that the SMCP is deployed into istio-system. If not update the above command before running it.
 
 
-### Annotate the service account created above with a redirect URI to match the ingress gatway route to be used by the oauth-proxie sidecar in the service mesh control plane namespace. 
+### Annotate the service account created above (or the default serviceaccount used by the ingress gateway istio-ingressgateway-service-account) with a redirect URI to match the ingress gatway route to be used by the oauth-proxie sidecar in the service mesh control plane namespace. 
 ```
-$ oc -n istio-system annotate serviceaccount bookinfo serviceaccounts.openshift.io/oauth-redirecturi.first='https://$(oc -n istio-system get route istio-ingressgateway -o jsonpath='{.spec.host}')'
+$ oc -n istio-system annotate serviceaccount bookinfo serviceaccounts.openshift.io/oauth-redirecturi.first="https://$(oc -n istio-system get route istio-ingressgateway -o jsonpath='{.spec.host}'")
 ```
 
 ### Grant the istio-gateway-service-account auth-delegator permissions in the service mesh control plane namespace. 
@@ -113,5 +113,5 @@ route.route.openshift.io/istio-ingressgateway patched
 ```
 
 ### Test the OpenShift Oauth-proxy redirection workflow to access bookinfo
-In a browser, in a private navigation mode, open `https://$(oc -n kubic-ocp-oauth-smcp get route istio-ingressgateway -o jsonpath='{.spec.host}')/productpage` .
+In a browser, in a private navigation mode, open `https://$(oc -n istio-system get route istio-ingressgateway -o jsonpath='{.spec.host}')/productpage` .
 You are redirected to our OpenShift Login page, and if you authenticate using `localuser:localuser` you are then successfully redirected to the `bookinfo` application.
