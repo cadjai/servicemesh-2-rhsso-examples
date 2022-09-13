@@ -59,7 +59,7 @@ Again above it was assumed that the SMCP is deployed into istio-system. If not u
 $ oc -n istio-system annotate serviceaccount bookinfo serviceaccounts.openshift.io/oauth-redirecturi.first="https://$(oc -n istio-system get route istio-ingressgateway -o jsonpath='{.spec.host}'")
 ```
 
-### Grant the istio-gateway-service-account auth-delegator permissions in the service mesh control plane namespace. 
+### Grant the istio-gateway-service-account auth-delegator permissions in the service mesh control plane namespace if you will be using Openshift Subject Access Review (SAR) within the oauth-proxy sidecar. 
 ```
 $ oc adm policy add-cluster-role-to-user system:auth-delegator system:serviceaccount:istio-system:istio-ingressgateway-service-account 
 ```
