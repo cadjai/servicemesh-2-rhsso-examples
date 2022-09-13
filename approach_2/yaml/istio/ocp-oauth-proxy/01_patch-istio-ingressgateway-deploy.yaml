@@ -35,10 +35,10 @@ spec:
           --openshift-delegate-urls={"/":{ "resource":"namespaces",
               "verb":"get"
               }}
-        - >-
-          --openshift-sar={"apiVersion": "authorization.openshift.io/v1", "kind":
-              "SubjectAccessReview", "resource": "namespaces", "verb": "get"
-              }
+        #- >-
+        #  --openshift-sar={"apiVersion": "authorization.openshift.io/v1", "kind":
+        #      "SubjectAccessReview", "resource": "namespaces", "verb": "get"
+        #      }
         # (better option: mount OCP ingress CA in the pod and use --provider-ca-file)
         #- -tls-cert=/etc/tls/private/tls.crt
         #- -tls-key=/etc/tls/private/tls.key
